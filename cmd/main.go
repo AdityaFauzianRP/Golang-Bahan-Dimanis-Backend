@@ -9,14 +9,12 @@ import (
 	"arsip-sejarah-al/internal/service"
 	"context"
 	"fmt"
-	"log"
-	"strings"
-
 	"github.com/gin-gonic/gin"
+	"log"
 )
 
 func main() {
-	cfg, err := config.LoadConfig("config.json")
+	cfg, err := config.LoadConfig("config-production.json")
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
@@ -40,6 +38,8 @@ func main() {
 		log.Fatalf("Failed to load routes from database: %v", err)
 	}
 
+	validationRepo := repository.NewValidationSpecRepository(dbpool)
+
 	for _, route := range routes {
 		if err := validateRoute(route); err != nil {
 			log.Printf("Skipping invalid route: %v", err)
@@ -47,28 +47,30 @@ func main() {
 		}
 
 		if route.Middleware {
-			// Gunakan group yang sudah dilindungi JWT untuk rute dengan middleware true
-			secure := r.Group("").Use(middleware.JWTAuthMiddleware())
+			specs, err := validationRepo.GetValidationSpecs(context.Background(), route.Path)
+			if err != nil {
+				log.Fatalf("Failed to load validation specs: %v", err)
+			}
+
+			secure := r.Group("").Use(middleware.JWTAuthMiddleware(), middleware.ValidateUser(dbpool))
+			secure.Use(middleware.ValidateDataMiddleware(specs))
 			path := adjustPathForSecureGroup(route.Path)
 			secure.Handle(route.Method, path, userHandler.GetHandler(route.FunctionName))
 		} else {
-			// Rute tanpa middleware
-			r.Handle(route.Method, route.Path, userHandler.GetHandler(route.FunctionName))
+			specs, err := validationRepo.GetValidationSpecs(context.Background(), route.Path)
+			if err != nil {
+				log.Fatalf("Failed to load validation specs: %v", err)
+			}
+			standar := r.Group("").Use(middleware.ValidateDataMiddleware(specs))
+			standar.Handle(route.Method, route.Path, userHandler.GetHandler(route.FunctionName))
 		}
 	}
 
-	log.Fatal(r.Run(":8081"))
+	log.Fatal(r.Run(":8082"))
 }
 
 func adjustPathForSecureGroup(path string) string {
-	if !strings.HasPrefix(path, "/s") {
-		return "/s" + path
-	}
 	return path
-}
-
-func isSecureRoute(path string) bool {
-	return strings.HasPrefix(path, "/s")
 }
 
 func validateRoute(route model.APIRoute) error {

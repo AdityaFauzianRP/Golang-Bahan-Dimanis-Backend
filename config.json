@@ -1,3 +1,0 @@
-{
-  "database_url": "postgres://superadmin:superpassword@localhost:5432/postgres?sslmode=disable"
-}
